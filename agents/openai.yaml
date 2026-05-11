@@ -1,0 +1,12 @@
+interface:
+  display_name: "Pixel Art Generator"
+  short_description: "Generate beautiful 2D pixel art characters and objects from a prompt or reference image."
+  default_prompt: "Generate a pixel art [character|object] of <description>, in <aesthetic> style."
+
+author:
+  name: "Dorian Butron"
+
+dependencies:
+  python:
+    - "Pillow>=10.0"
+    - "numpy>=1.24"

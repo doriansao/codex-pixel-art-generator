@@ -33,23 +33,38 @@ The skill is mechanical — the snapper + upscaler convert any input into clean 
 
 ### Prerequisites
 
-- [Codex CLI](https://github.com/openai/codex) installed and `CODEX_HOME` set (defaults to `~/.codex`)
+- [Codex CLI](https://github.com/openai/codex) (modern version with the `.system` skills bundle)
 - Python 3.10+
-- The `imagegen` system skill (bundled with Codex at `$CODEX_HOME/skills/.system/imagegen/`)
+- The `imagegen` system skill at `$CODEX_HOME/skills/.system/imagegen/` (bundled with Codex)
 
-### Option A — Install via Codex CLI (recommended)
+### Option A — Install via `$skill-installer` (recommended)
 
-```bash
-codex skill add https://github.com/<your-username>/codex-pixel-art-generator
+Open an active Codex chat session and invoke the bundled installer skill:
+
+```
+$skill-installer install https://github.com/doriansao/codex-pixel-art-generator
 ```
 
-Codex reads the `name:` field from `SKILL.md`'s frontmatter and installs the skill at `$CODEX_HOME/skills/pixel-art-generator/`. The skill is registered and ready to invoke after install.
+The `$` is Codex's in-session skill-invocation marker (typed inside the Codex chat, not in a shell). The `skill-installer` skill is a built-in `.system` skill auto-installed with modern Codex.
 
-### Option B — Manual clone
+It clones the repo into `$CODEX_HOME/skills/pixel-art-generator/` (using the `name:` field from `SKILL.md`'s frontmatter as the folder name). The skill is picked up by Codex automatically. If it doesn't appear, restart Codex.
+
+See [OpenAI's skills catalog](https://github.com/openai/skills) and [Codex skills docs](https://developers.openai.com/codex/skills) for more on the installer.
+
+### Option B — Manual `git clone`
+
+If you prefer the explicit path or you're on an agent host that doesn't have `$skill-installer`:
 
 ```bash
-git clone https://github.com/<your-username>/codex-pixel-art-generator.git \
-  "$CODEX_HOME/skills/pixel-art-generator"
+git clone https://github.com/doriansao/codex-pixel-art-generator.git \
+  "${CODEX_HOME:-$HOME/.codex}/skills/pixel-art-generator"
+```
+
+Windows PowerShell:
+
+```powershell
+$skills = if ($env:CODEX_HOME) { "$env:CODEX_HOME\skills" } else { "$HOME\.codex\skills" }
+git clone https://github.com/doriansao/codex-pixel-art-generator.git "$skills\pixel-art-generator"
 ```
 
 The folder name in `$CODEX_HOME/skills/` must be `pixel-art-generator` (matching `SKILL.md`'s `name:` field), not `codex-pixel-art-generator` (the repo name).
@@ -67,6 +82,17 @@ Or with `uv`:
 ```bash
 uv pip install "Pillow>=10.0" "numpy>=1.24"
 ```
+
+### Updating
+
+To pull the latest changes:
+
+```bash
+cd "${CODEX_HOME:-$HOME/.codex}/skills/pixel-art-generator"
+git pull
+```
+
+Restart Codex if the updates don't appear.
 
 ## Usage
 

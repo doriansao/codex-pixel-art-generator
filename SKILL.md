@@ -279,7 +279,18 @@ python scripts/snap_pixels.py \
     --colors 16
 ```
 
-`--colors` is the k-means palette size. Defaults: `16` (Hugo's default — tight, classic pixel-art palette); raise to `24-32` for color-rich subjects, lower to `8-12` for hardware-constrained 8-bit feel.
+`--colors` is the k-means palette size. **Picking the right `k` is load-bearing** — it controls whether shading on skin, hair, and metallic surfaces resolves into distinct mid-tones or collapses into flat blocks. Pick based on the subject's era / aesthetic, not on intuition:
+
+| `--colors` | Use when the subject's era / aesthetic is… | Examples (per `visual-vocabulary.md`) |
+|---|---|---|
+| **8–12** | hardware-constrained early eras (small palette per sprite is the AESTHETIC) | 8-bit primitive, 8-bit NES, Game Boy DMG (4-shade), Pico-8 fantasy-console, pixel horror lo-fi, roguelike top-down |
+| **16** (default) | classic 8/16-bit consoles + arcade golden age | Game Boy Color, 16-bit SNES JRPG overworld, 16-bit Genesis console, arcade beat'em-up, isometric tactics |
+| **24** | refined handhelds + early modern indie chunky | GBA refined handheld, modern indie chunky, Western RPG / post-apocalyptic, DOS / VGA adventure, Japanese PC-98 |
+| **32** | arcade fighters, modern indie painterly, atmospheric color-rich subjects | arcade 16-bit fighter, late-arcade 2D fighter, modern indie painterly, cyberpunk pixel-art, dark fantasy / soulslike, Diablo-style dark fantasy isometric |
+| **48** | HD-2D hybrid, painterly characters with realistic skin / hair gradation | HD-2D hybrid era; any modern character where skin needs 3-4 distinct tones (base / shadow / midtone / highlight) and hair needs 3-4 brown/blonde variations |
+| **64** | maximum painterly fidelity, complex multi-material props (shields with wood-grain + metal + cloth + leather all distinct) | rare — only when k=48 visibly loses important color separation; matches Hugo's reference tool's high-fidelity setting |
+
+**Rule of thumb for humans with visible skin:** k=16 is too tight for warm skin to render with a proper base+shadow+highlight separation (skin tones get merged into one centroid, looking pasty or flat). Use **k=32-48 for any human character**. Reserve k=8-16 for non-human subjects (props, monsters, mechs, hardware-constrained-era characters).
 
 Output: small native logical resolution (e.g., 114×114), transparent bg, perfect pixel grid.
 

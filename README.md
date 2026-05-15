@@ -118,7 +118,7 @@ Convert this character to pixel art.
 
 The agent walks through the 6-step pipeline, showing you the raw concept at Step 3 for accept/modify/reject before running bg removal and the snapper.
 
-If your prompt mentions a recognizable IP (character / franchise / studio / game-title / hardware name), or you attach an image depicting protected IP, the agent runs the **6-phase IP-reference process** documented in `SKILL.md` → Step 1: it translates the reference into abstract design dimensions, transforms identity-bearing traits, and writes a final prompt using only abstract descriptors. The output is inspired by your intent but is genuinely original — no protected proper nouns reach the image generator.
+If your prompt mentions a recognizable IP or source reference (character / franchise / studio / publisher / specific game title), or you attach an image depicting protected IP, the agent runs the **6-phase IP-reference process** documented in `SKILL.md` → Step 1: it translates the reference into abstract design dimensions, transforms identity-bearing traits, and writes a final prompt with original descriptive traits. Hardware / era / genre descriptors like `NES-style`, `SNES-era`, `Game Boy-style`, `arcade beat'em-up`, and `16-bit JRPG` are allowed when useful, but protected identity / source-IP names do not reach the image generator.
 
 Note for agent hosts: the built-in `image_gen` tool may only accept a single `prompt` argument. Put square framing and quality guidance inside the prompt instead of passing `size`, `quality`, model, or destination-path arguments unless the live tool schema explicitly supports them.
 
@@ -162,7 +162,7 @@ codex-pixel-art-generator/                # repo name on GitHub
 │   └── upscale.py                        # aspect-preserving NEAREST upscaler
 └── references/
     ├── concept-prompt-template.md        # imagegen prompt template + 6-phase process examples
-    ├── visual-vocabulary.md              # abstract descriptive vocabulary (era / palette / silhouette / mood) — no IP
+    ├── visual-vocabulary.md              # descriptive vocabulary (era / palette / silhouette / mood) — no protected IP
     ├── imagegen-sizes.md                 # size + quality settings for imagegen
     └── failure-modes.md                  # symptom → cause → fix table
 ```

@@ -2,7 +2,7 @@
 
 Quick descriptive reference for the agent during **Phase 3 (extract abstract design dimensions)** of the prompt-enrichment process — see `SKILL.md` → Step 1.
 
-**No IP**: no character names, no franchise names, no studio names, no game titles. Pure descriptive vocabulary organized by era / genre / mood / silhouette / palette. The agent uses this to translate any IP reference (which is detected and stripped in Phase 1) into abstract terms that work in the final `image_gen` prompt without tripping IP guardrails.
+**No protected identity / source-IP names**: no character names, no franchise names, no studio / publisher names, no specific game titles. Hardware / era / genre descriptors are allowed when useful (`NES-style`, `SNES-era`, `Game Boy-style`, `arcade beat'em-up`, `16-bit JRPG`, etc.), and should be paired with concrete visual constraints. The agent uses this vocabulary to translate protected references detected in Phase 1 into abstract terms that work in the final `image_gen` prompt without tripping IP guardrails.
 
 The agent uses its world knowledge for anything not covered here.
 
@@ -224,7 +224,7 @@ The agent uses its world knowledge for anything not covered here.
 - Chibi-anime proportions (head ~1/3 of body, super-deformed)
 - 3/4 isometric viewing angle — character renders as if standing on an isometric grid
 
-### Diablo-style dark fantasy isometric
+### Dark fantasy isometric dungeon-crawl
 
 - 32-40 colors per sprite, cold-stone / deep-brown / deep-red / dim-gold dark-fantasy palette
 - 40-64 px tall character (foreshortened by isometric angle)
@@ -244,7 +244,7 @@ The agent uses its world knowledge for anything not covered here.
 - **Fighter (1v1)**: combat stance, muscular adult proportions, exotic costume, hero or villain archetype, foot-planted ready
 - **Action-platformer hero**: heroic action pose, weapon or signature ability visible (sword / gun / whip), dynamic athletic build
 - **Shmup spaceship / mecha**: small compact sprite, top-down or side-view, spaceship / mecha / aircraft, energy weapons visible
-- **Monster-catching RPG creature**: cute compact creature, expressive eyes, paired short limbs, signature elemental motif (water / fire / electric / grass / etc.), friendly stance
+- **Creature-collection companion**: compact fantasy critter, expressive eyes, paired short limbs or fins or wings, broad elemental motif (water / fire / spark / leaf / stone / wind), friendly stance. If the user referenced a protected creature, transform body taxonomy, palette, markings, and effect placement so the final design is original.
 - **Tactical RPG unit**: 3/4 isometric view, chibi-anime proportions, weapon held, fantasy class costume
 - **Top-down action-adventure hero**: 3/4 perspective, chibi 1:3 proportions, simple readable silhouette, sword / shield
 - **Post-apocalyptic survivor**: weathered gritty attire, gas-mask / leather / improvised armor, gaunt features, hardened look

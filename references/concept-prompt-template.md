@@ -23,7 +23,7 @@ This bg gets stripped to transparent in Step 4 by the imagegen helper. The user 
 ```text
 Use case: stylized-concept
 Asset type: 2D video game <character | monster | weapon | item | powerup | prop | vehicle | tile | environment> pixel art
-Primary request: <one-line headline of what's being generated, paraphrasing the user's request>
+Primary request: <one-line SAFE headline of what's being generated. If the user mentioned protected IP/source names, do NOT copy the raw user request here; write an original sanitized headline with no protected names, no "X-like", no "inspired by X", and no "not X" clauses.>
 Input images: <Image 1: user reference (preserve identity / silhouette / costume / key features; transform only the rendering style to pixel art). Do NOT use the reference's background — replace with the chroma-key.> | NONE
 Subject: <RICH ENRICHED description — see "Agent's prompt-enrichment job" below>
 Pixel art rendering: HAND-DRAWN PIXEL ART. The output must look like it was drawn pixel-by-pixel in a sprite-art editor by a human artist — chibi or compact-sprite proportions, 2-3 tones per color region (base + shadow + optional highlight), 1-pixel dark colored outlines, visible pixel grid where every "pixel" is a solid block of one palette color with crisp 1-pixel-step boundaries — NOT a detailed AI illustration with pixel-art surface treatment. NO anti-aliasing on edges. NO smooth gradient shading. NO sub-pixel detail (no individual fur strands, no fine wrinkles, no thin lines smaller than 1 logical pixel, no glasses frames thinner than 1 logical pixel, no whiskers thinner than 1 logical pixel). Painterly multi-tone shading ONLY if the user explicitly asked for it.
@@ -34,14 +34,14 @@ Avoid: scenery, floor, drop shadow, environment around character, MULTIPLE SUBJE
 
 ## Agent's prompt-enrichment job
 
-The user gives a natural-language input. The agent translates it into a rich `Subject:` line via the **6-phase IP-reference process** documented in `SKILL.md` → Step 1. The phases in summary:
+The user gives a natural-language input. The agent translates it into a complete safe image-generation prompt via the **6-phase IP-reference process** documented in `SKILL.md` → Step 1. The raw user wording is NEVER pasted directly into the final `image_gen` prompt when it contains protected/source-IP names. The phases in summary:
 
-1. **Detect** any proper-noun reference in the user's input (character / franchise / studio / game-title / hardware names, or recognizable IP visible in an attached reference image).
+1. **Detect** any protected/source-IP reference in the user's input (character / franchise / studio / publisher / specific game title, or recognizable IP visible in an attached reference image) plus any allowed hardware / era / genre style tokens.
 2. **Classify** the role: exact / like / image-of / style-anchor / era-only.
 3. **Extract** the 8 abstract design dimensions (asset type, body shape + silhouette, palette, distinctive motifs, emotional tone, era / hardware, gameplay role, camera / pose) using `references/visual-vocabulary.md`.
 4. **Transform** identity-bearing traits for HIGH-risk references (silhouette / palette / signature symbols / named powers / costume layout) so the output is clearly original.
-5. **Write** the final `Subject:` line using ONLY abstract dimensions — no protected proper nouns appear anywhere in the prompt.
-6. **Preflight** scan: confirm no leaked proper nouns, no "inspired by X" or "not X" clauses, correct handling of any reference image, and that HIGH-risk references actually got transformed.
+5. **Write** the complete final structured prompt using allowed hardware / era / genre tokens plus concrete visual dimensions — no protected identity / source-IP names appear anywhere in the prompt, including `Primary request`, `Input images`, `Subject`, `Constraints`, and `Avoid`.
+6. **Preflight** scan the complete prompt text before calling `image_gen`: confirm no leaked protected names, no "X-like", "inspired by X", or "not X" clauses, no protected semantic lookalike cluster, correct handling of any reference image, and that HIGH-risk references actually got transformed.
 
 Additionally, while writing the `Subject:` line:
 
@@ -60,7 +60,7 @@ Pick a chroma-key color (`#00ff00` default, `#ff00ff` for green-themed subjects,
 
 **User:** "a knight"
 
-**Phase 1 (Detect):** no proper nouns.
+**Phase 1 (Detect):** no protected/source-IP names.
 **Phase 2 (Classify):** N/A.
 **Phase 3 (Extract):** character / heroic 1:6 build, plate armor silhouette / SNES vibrant fantasy palette / heraldic motif on breastplate / heroic-action tone / 16-bit JRPG era / JRPG protagonist role / front 3/4 idle stance.
 **Phases 4-6:** no transformation needed; preflight clean.
@@ -72,7 +72,7 @@ Pick a chroma-key color (`#00ff00` default, `#ff00ff` for green-themed subjects,
 
 **User:** "a cyberpunk hacker girl with neon hair"
 
-**Phase 1 (Detect):** no proper nouns.
+**Phase 1 (Detect):** no protected/source-IP names.
 **Phase 2 (Classify):** N/A.
 **Phase 3 (Extract):** character / adult anime 1:6 build, slim / cyberpunk neon-on-dark palette / neon hair + tech-glow trim motif / cyberpunk-urban-night tone / cyberpunk pixel-art era / cyberpunk hacker role / front 3/4 angle.
 **Phases 4-6:** no transformation needed; preflight clean.
@@ -84,7 +84,7 @@ Pick a chroma-key color (`#00ff00` default, `#ff00ff` for green-themed subjects,
 
 **User:** "a magic sword"
 
-**Phase 1 (Detect):** no proper nouns.
+**Phase 1 (Detect):** no protected/source-IP names.
 **Phase 2 (Classify):** N/A.
 **Phase 3 (Extract):** weapon / vertical orientation / SNES vibrant fantasy palette with cool blue glow / sapphire-pommel + rune motif / regal-mystical tone / 16-bit JRPG era / JRPG item icon role / pure vertical front-facing.
 **Phases 4-6:** no transformation needed; preflight clean.
@@ -98,7 +98,7 @@ Pick a chroma-key color (`#00ff00` default, `#ff00ff` for green-themed subjects,
 
 (Filled-in example assuming the user named a recognizable armored-techno-hero from a major comics franchise — the process is identical for any such reference.)
 
-**Phase 1 (Detect):** one proper noun — the named superhero. Also implicit: the publisher / franchise.
+**Phase 1 (Detect):** one protected/source-IP name — the named superhero. Also implicit: the publisher / franchise.
 
 **Phase 2 (Classify):** `like` (HIGH-risk). The user is asking for an "X-like" character, not X exactly. Phase 4 is mandatory.
 
@@ -119,12 +119,15 @@ Pick a chroma-key color (`#00ff00` default, `#ff00ff` for green-themed subjects,
 
 **Phase 5 (Write final prompt):**
 
+**Primary request line:**
+> Original armored techno-brawler hero for a side-scrolling arcade beat'em-up.
+
 **Subject line:**
 > An original armored techno-brawler hero for a side-scrolling beat'em-up game — athletic adult build with chunky arcade proportions, oversized rectangular gauntlets, heavy armored boots, compact asymmetrical torso armor (one shoulder pauldron bulkier than the other), and a sharp angular helmet with a narrow cyan visor. Armor palette: deep crimson plates, brushed brass shoulder and knee guards, dark gunmetal joints, cyan energy lines along the seams, and a triangular chest power core set into the breastplate. Pose: 3/4 front-facing idle fighting stance, feet planted wide, one armored fist raised near the chest and the other pulled back with a subtle cyan energy glow in the palm. Arcade golden-age beat'em-up aesthetic — 48-80 px tall character, 16-32 colors per sprite, 2-3 tones per region with selective bright highlight pixels, bold 1-pixel solid black outlines, comic-book-on-pixels action-figure feel.
 
 **Phase 6 (Preflight):**
-- Copied proper nouns? None. ✓
-- "Inspired by X" / "not X" clauses? None — the prompt is purely positive abstract description. ✓
+- Copied protected/source-IP names anywhere in the complete prompt? None.
+- "X-like" / "inspired by X" / "not X" clauses anywhere in the complete prompt? None — the prompt is purely positive abstract description. ✓
 - Identity-preservation on protected refs? N/A (no image). ✓
 - Identity-bearing traits transformed? Palette shifted (crimson + brass + gunmetal instead of bright red + bright gold), costume layout altered (asymmetric, triangular core, narrow visor), powers genericized. 3 levers pulled. ✓
 
@@ -134,7 +137,7 @@ Prompt is safe to send.
 
 **User:** attaches a photo / illustration of an ORIGINAL character (their own art, OC, public-domain artwork, or a photo of a real person who consented) + "in pixel art"
 
-**Phase 1 (Detect):** no proper nouns in the image (it's the user's own / public-domain / OC art).
+**Phase 1 (Detect):** no protected/source-IP names in the image (it's the user's own / public-domain / OC art).
 **Phase 2 (Classify):** original reference — bypasses Phases 2-4 of the IP-reference branch. Uses Variation 3 ("preserve identity, transform rendering style").
 
 **`Input images:` line:**
@@ -151,7 +154,7 @@ Prompt is safe to send.
 **Phase 2 (Classify):** `image-of` (HIGH-risk). The image is NOT sent to `image_gen` — the agent reads visual traits from it internally and translates to abstract terms.
 **Phases 3-4:** extract the 8 abstract dimensions from the image, then transform identity-bearing traits (silhouette / palette / signature symbols / named powers / costume layout) so the output is clearly original.
 **Phase 5:** write the Subject line using only abstract dimensions.
-**Phase 6:** preflight clean — `Input images:` line is absent (check #3); no copied proper nouns; identity transformed.
+**Phase 6:** preflight clean — `Input images:` line is absent (check #3); no copied protected/source-IP names; identity transformed.
 
 **`Input images:` line:** `NONE` (the image is NOT passed to `image_gen`).
 
@@ -163,7 +166,7 @@ Prompt is safe to send.
 
 **User:** "grass tile for a top-down rpg"
 
-**Phase 1 (Detect):** no proper nouns.
+**Phase 1 (Detect):** no protected/source-IP names.
 **Phase 2 (Classify):** N/A.
 **Phase 3 (Extract):** environment tile / pure top-down view / warm-earthy cottagecore palette / grass-blade motif / cute-friendly tone / modern indie chunky era / top-down action-RPG role / pure top-down camera.
 
@@ -176,8 +179,9 @@ Prompt is safe to send.
 - **Don't invent extra characters / companions.** One subject only.
 - **Don't add scenery / background details** beyond the chroma-key bg.
 - **Don't add lore or backstory** the user didn't ask for.
-- **Don't include protected proper nouns in the prompt.** Character names, franchise names, studio names, game titles, and hardware names are all stripped during the 6-phase process. The final prompt uses abstract descriptors from `visual-vocabulary.md` instead.
-- **Don't leave "inspired by X" or "not X" clauses in the prompt.** Even negative clauses trip the IP guardrail. Phase 6 preflight catches these.
+- **Don't include protected identity / source-IP names anywhere in the complete prompt.** Character names, franchise names, studio / publisher names, and specific game titles are translated during the 6-phase process. Hardware / era / genre descriptors like NES-style, SNES-era, Game Boy-style, arcade beat'em-up, 16-bit JRPG, and creature-collection RPG are allowed when useful, but they should be paired with concrete descriptors from `visual-vocabulary.md`.
+- **Don't leave "X-like", "inspired by X", or "not X" clauses anywhere in the prompt.** Even negative clauses trip the IP guardrail. Phase 6 preflight catches these.
+- **Don't keep protected semantic clusters.** If the sanitized prompt still points strongly to one protected subject, transform at least 3 identity levers before calling `image_gen`: species/body taxonomy, silhouette, palette, markings/symbols, power/effect placement, costume/accessory layout, role framing, pose, or camera.
 - **Don't skip Phase 4 transformation for HIGH-risk references.** If the description reads like a 1:1 copy with the name removed, it'll still look like the named character — pull more identity-altering levers.
 - **Don't over-specify.** If the user is vague, add ENOUGH detail for coherence (color palette, basic clothing, pose) but don't write a paragraph for each body part.
 

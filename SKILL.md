@@ -194,12 +194,16 @@ For ORIGINAL reference images (user's own art, OC, public-domain artwork, photo 
 
 **Pick a concept-art chroma-key:**
 
-- Default: `#00ff00` (green).
-- Use `#ff00ff` (magenta) if the subject is green-themed (green dragon, slime, grass-warrior, forest druid, Hulk-style character).
-- Use `#FFFF00` (yellow) for the rare case where the subject contains BOTH green AND magenta (e.g., ZX Spectrum palette characters that use both as canonical colors, or a watermelon prop with green skin and pink/magenta flesh).
-- Avoid `#0000ff` (blue) for blue subjects.
+The rule: **the chroma-key's strong channels must NOT match the subject's strong channels.** The bg-removal helper detects which channels are "key channels" and treats any pixel dominated by those channels as key-like. If skin / hair / clothing / saturated accents share a strong channel with the key, those pixels get stripped to transparent.
 
-This is the bg the model renders BEHIND the subject; it's stripped to transparent at Step 4.
+- **Default: `#00ff00`** (green). Strong channel: G. Safe for almost everything — humans (warm skin = R + some B, not G), most clothing, most natural subjects.
+- **Use `#ff00ff`** (magenta) ONLY when the subject's dominant body color is green AND the subject contains NO warm skin tones (e.g., green slime, green dragon, full-body Hulk-style character, forest druid with green hood covering the face). **Never use magenta for human characters with visible skin** — warm pink/peach skin is R-dominant, and magenta has R as a key channel; despill will strip the red from skin and turn it white/gray. Olive-jacket-but-human-face = green chroma-key.
+- **Use `#FFFF00`** (yellow) for the rare case where the subject contains BOTH green AND magenta (e.g., a watermelon prop with green skin and magenta flesh, or a ZX Spectrum palette character). Strong channels: R + G. Avoid for warm-skinned humans (same R-dominance problem as magenta).
+- **Avoid `#0000ff`** (blue) for blue subjects (blue clothing, blue hair, water elementals).
+
+If two different rules conflict (e.g., humanoid with green hair and pink skin), prefer the **default green** unless the green character body color is truly dominant in the silhouette. A pale-pink face is more visually load-bearing than green hair, so green chroma-key is correct.
+
+This is the bg the model renders BEHIND the subject; it's stripped to transparent at Step 4 using `--key-color "<HEX>"` (explicit — NEVER `--auto-key border`, see Step 4 explanation).
 
 **Save** the agent's enriched prompt to `tmp/prompt.md`. This is for the user's reference — useful for debugging (compare against what `image_gen` produced), iterating (tweak by hand and re-run), or auditing the agent's translation work (especially for HIGH-risk IP-reference cases where the agent ran the full 6-phase process).
 
@@ -235,11 +239,13 @@ Iteration is unbounded. Concept art is the visual ceiling — get it right befor
 
 ### Step 4 — Strip background to transparent (after user accepts)
 
+Pass `--key-color "<HEX>"` matching the chroma-key you chose in Step 1 (e.g., `#00ff00`, `#ff00ff`, `#FFFF00`). **Do not use `--auto-key border`** — it samples the actual border pixel color from the imagegen output, and the model often renders the bg as a near-but-not-exact color (e.g., `#fa03e8` instead of `#ff00ff` with a 1-2 pixel gradient). When the auto-sampled key has even one channel below the spill-detection threshold (`max - 16`), the helper misclassifies the key as a single-channel key, and any pixel dominated by that channel gets treated as key-like — including warm-skinned human faces on a magenta bg, or green-themed characters on a green bg.
+
 ```bash
 python "${CODEX_HOME:-$HOME/.codex}/skills/.system/imagegen/scripts/remove_chroma_key.py" \
     --input tmp/imagegen/<name>_concept_raw.png \
     --out concept/<name>_concept.png \
-    --auto-key border \
+    --key-color "<CHROMA_KEY_HEX>" \
     --soft-matte \
     --transparent-threshold 12 \
     --opaque-threshold 220 \
@@ -253,14 +259,16 @@ $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USER
 python (Join-Path $codexHome "skills/.system/imagegen/scripts/remove_chroma_key.py") `
     --input tmp/imagegen/<name>_concept_raw.png `
     --out concept/<name>_concept.png `
-    --auto-key border `
+    --key-color "<CHROMA_KEY_HEX>" `
     --soft-matte `
     --transparent-threshold 12 `
     --opaque-threshold 220 `
     --despill
 ```
 
-Validate: alpha channel present, transparent corners, subject coverage plausible, no key-color fringe. If a thin fringe remains, retry once with `--edge-contract 1`.
+Substitute `<CHROMA_KEY_HEX>` with the same color you embedded in the imagegen prompt's `Scene/backdrop` block (default `#00ff00`).
+
+Validate: alpha channel present, transparent corners, subject coverage plausible, no key-color fringe, **and skin / dominant subject colors fully opaque**. If skin or saturated foreground areas came out transparent or pale, the chroma-key choice was wrong for this subject (see Step 1 chroma-key picker + `references/failure-modes.md`). If a thin fringe remains, retry once with `--edge-contract 1`.
 
 ### Step 5 — Pixel snap (Sprite Fusion)
 

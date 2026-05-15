@@ -102,11 +102,11 @@ Invoke the skill in your agent host with a natural-language prompt:
 Generate a pixel art knight with full plate armor and a longsword.
 ```
 
-Or with a style reference:
+Or with an era / mood hint:
 
 ```
-Generate a pixel art character in the style of River City Ransom (NES) —
-a young brawler with spiky black hair, white tank top, blue jeans, red sneakers.
+Generate a pixel art character — a young urban brawler with spiky black hair,
+white tank top, blue jeans, red sneakers, in a late-80s NES beat'em-up aesthetic.
 ```
 
 Or attach a reference image:
@@ -117,6 +117,10 @@ Convert this character to pixel art.
 ```
 
 The agent walks through the 6-step pipeline, showing you the raw concept at Step 3 for accept/modify/reject before running bg removal and the snapper.
+
+If your prompt mentions a recognizable IP (character / franchise / studio / game-title / hardware name), or you attach an image depicting protected IP, the agent runs the **6-phase IP-reference process** documented in `SKILL.md` → Step 1: it translates the reference into abstract design dimensions, transforms identity-bearing traits, and writes a final prompt using only abstract descriptors. The output is inspired by your intent but is genuinely original — no protected proper nouns reach the image generator.
+
+Note for agent hosts: the built-in `image_gen` tool may only accept a single `prompt` argument. Put square framing and quality guidance inside the prompt instead of passing `size`, `quality`, model, or destination-path arguments unless the live tool schema explicitly supports them.
 
 ## How it works
 
@@ -141,6 +145,8 @@ For perfectly uniform block widths, pass `--scale N` for an integer scale factor
 
 Uses the `imagegen` system skill's bundled `remove_chroma_key.py` helper (proper alpha matting + despill). Color-distance matching at any tolerance > 0 punches holes in character pixels close to the bg color; the imagegen helper's soft matte preserves them via partial alpha.
 
+On Windows PowerShell, resolve the helper through `$env:CODEX_HOME` if set, otherwise `$env:USERPROFILE\.codex`; Bash-style `${CODEX_HOME:-$HOME/.codex}` fallback syntax is for Bash examples only.
+
 ## Project structure
 
 ```
@@ -155,8 +161,8 @@ codex-pixel-art-generator/                # repo name on GitHub
 │   ├── snap_pixels.py                    # Sprite Fusion pixel snapper (k-means + walk + mode)
 │   └── upscale.py                        # aspect-preserving NEAREST upscaler
 └── references/
-    ├── concept-prompt-template.md        # imagegen prompt template + agent enrichment examples
-    ├── style-references.md               # game-name reference list by era / mood
+    ├── concept-prompt-template.md        # imagegen prompt template + 6-phase process examples
+    ├── visual-vocabulary.md              # abstract descriptive vocabulary (era / palette / silhouette / mood) — no IP
     ├── imagegen-sizes.md                 # size + quality settings for imagegen
     └── failure-modes.md                  # symptom → cause → fix table
 ```

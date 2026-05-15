@@ -98,13 +98,44 @@ def upscale(
         # Find the largest integer scale that fits the input inside the canvas.
         scale_w = canvas_w // orig_w
         scale_h = canvas_h // orig_h
-        fit_scale = max(1, min(scale_w, scale_h))
 
-        scaled_w = orig_w * fit_scale
-        scaled_h = orig_h * fit_scale
+        if scale_w < 1 or scale_h < 1:
+            # Input is larger than the canvas on at least one axis. This
+            # USUALLY means pipeline misuse — `upscale.py` expects the
+            # small native-resolution snapped sprite (Step 5 output,
+            # typically 50-250 px per side), not a full-resolution concept
+            # (Step 4 output, ~1024x1024). If you're seeing this warning,
+            # check that you ran `snap_pixels.py` before `upscale.py`.
+            #
+            # We still produce an output via a NEAREST downscale so the
+            # call doesn't fail outright, but the warning is loud so the
+            # misuse doesn't go unnoticed.
+            import sys
 
-        # NEAREST-upscale by the integer factor (perfect pixel grid).
-        scaled = img.resize((scaled_w, scaled_h), Image.Resampling.NEAREST)
+            fit_ratio = min(canvas_w / orig_w, canvas_h / orig_h)
+            scaled_w = max(1, int(orig_w * fit_ratio))
+            scaled_h = max(1, int(orig_h * fit_ratio))
+            print(
+                f"  WARNING: input ({orig_w}x{orig_h}) is LARGER than the "
+                f"target canvas ({canvas_w}x{canvas_h}). This usually means "
+                f"the pipeline was used incorrectly — `upscale.py` expects "
+                f"the small snapped sprite from `snap_pixels.py` (Step 5), "
+                f"not the full-resolution concept (Step 4).\n"
+                f"  Did you skip Step 5 (the pixel snap)? Run snap_pixels.py "
+                f"first.\n"
+                f"  Proceeding with a NEAREST downscale to {scaled_w}x{scaled_h} "
+                f"to fit the canvas — some input pixels are dropped and the "
+                f"per-pixel art quality is reduced. Pass --scale N to skip "
+                f"canvas-fit entirely, or --size with a larger canvas.",
+                file=sys.stderr,
+            )
+            scaled = img.resize((scaled_w, scaled_h), Image.Resampling.NEAREST)
+        else:
+            # Normal case: integer-scale up so the input fits inside the canvas.
+            fit_scale = min(scale_w, scale_h)
+            scaled_w = orig_w * fit_scale
+            scaled_h = orig_h * fit_scale
+            scaled = img.resize((scaled_w, scaled_h), Image.Resampling.NEAREST)
 
         # Center on a transparent canvas of the target size.
         result = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
@@ -163,13 +194,21 @@ def main() -> None:
     if args.scale is not None:
         print(f"  mode: explicit-scale {args.scale}x")
     else:
-        scale_w = args.size[0] // orig_w
-        scale_h = args.size[1] // orig_h
-        fit_scale = max(1, min(scale_w, scale_h))
-        scaled_w = orig_w * fit_scale
-        scaled_h = orig_h * fit_scale
-        print(f"  mode: canvas-fit (canvas {args.size[0]}x{args.size[1]})")
-        print(f"  fit scale: {fit_scale}x -> image at {scaled_w}x{scaled_h}, centered with transparent padding")
+        canvas_w, canvas_h = args.size[0], args.size[1]
+        scale_w = canvas_w // orig_w
+        scale_h = canvas_h // orig_h
+        if scale_w < 1 or scale_h < 1:
+            fit_ratio = min(canvas_w / orig_w, canvas_h / orig_h)
+            scaled_w = max(1, int(orig_w * fit_ratio))
+            scaled_h = max(1, int(orig_h * fit_ratio))
+            print(f"  mode: canvas-fit DOWNSCALE (canvas {canvas_w}x{canvas_h}, input larger than canvas)")
+            print(f"  fit ratio: {fit_ratio:.3f}x -> image at {scaled_w}x{scaled_h}, centered with transparent padding")
+        else:
+            fit_scale = min(scale_w, scale_h)
+            scaled_w = orig_w * fit_scale
+            scaled_h = orig_h * fit_scale
+            print(f"  mode: canvas-fit upscale (canvas {canvas_w}x{canvas_h})")
+            print(f"  fit scale: {fit_scale}x -> image at {scaled_w}x{scaled_h}, centered with transparent padding")
 
 
 if __name__ == "__main__":

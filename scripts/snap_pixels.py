@@ -4,28 +4,38 @@
 Faithful Python port of Hugo Duprez's spritefusion-pixel-snapper algorithm
 (MIT, Rust+WASM, https://github.com/Hugo-Dz/spritefusion-pixel-snapper).
 
-The crucial detail is the ORDER:
-  1. K-MEANS QUANTIZE the FULL-RESOLUTION input first (default k=16, k-means++
-     init, max 15 iters, squared-Euclidean RGB, alpha=0 pixels excluded from
-     training and passed through unchanged).
+Algorithm (in order):
+  1. K-MEANS++ QUANTIZE the FULL-RESOLUTION input (default k=16, max 15
+     iters, squared-Euclidean RGB). Pixels with alpha > 0 are included in
+     training; alpha=0 pixels are passed through unchanged.
   2. Every opaque pixel is replaced with its nearest centroid → an
      intermediate full-res image with only k distinct RGB values.
-  3. Detect native pixel block size (auto or `--pixel-size`).
-  4. For each NxN block, take the MODE (most common exact RGBA) of the
-     quantized pixels.
-  5. Save at native logical resolution.
+  3. Compute 1D gradient profiles over the quantized image (full gray when
+     alpha > 0; 0 when alpha == 0 — matches Hugo's compute_profiles).
+  4. Estimate native pixel step size per axis from the median of peak-to-
+     peak distances in each profile. Step size is a FLOAT (not int) so the
+     walker stays locked on the true grid across the full sprite.
+  5. WALK each profile to find non-uniform cuts at local gradient peaks
+     within a ±step*0.35 window. Only snap to a peak if its value exceeds
+     0.5 × mean(profile); otherwise place a uniform cut. This prevents
+     noise-snap in smooth regions.
+  6. If a walker yielded too few cuts (weak profile), fall back to uniform
+     cuts at the resolved step size.
+  7. For each cell defined by the cuts, take the MODE of (R,G,B,A) tuples
+     of the quantized pixels — ties broken by smallest packed value.
 
-Why this order matters: in a smooth gradient on raw RGB, every pixel has a
-UNIQUE color, so block-mode would pick a random pixel — producing noisy
-gradients. After k-means quantization, the gradient has only 2-3 distinct
-colors per region, so block-mode locks onto a clear supermajority. This is
-what makes Sprite Fusion's output cleanly banded vs. speckled.
+Why this matters for OUTLINE QUALITY:
 
-Why k-means (not FASTOCTREE): k-means concentrates centroids in dense
-regions of the color histogram. AI-generated pixel art has soft fringe
-noise around each "real" rendered color — k-means collapses that fringe
-into the real centroid. FASTOCTREE bins by spatial cube subdivision and
-tends to preserve fringe noise as distinct palette entries.
+- K-means trained on alpha-edge pixels (alpha 1-127) sees enough dark
+  outline samples to allocate a dedicated near-black centroid. Excluding
+  those pixels (the old default of alpha_threshold=128) starved the dark
+  cluster and pulled outlines into a "dark brown" centroid.
+- Float step + float walker arithmetic keeps cell boundaries aligned with
+  the true logical-pixel grid. Int-truncating the step compounds a 0.5px
+  error over each step and smears 1-pixel outlines across two cells, where
+  the body color wins mode and the outline disappears.
+- Walker strength threshold (0.5 × mean) keeps the walker on the true grid
+  in smooth regions instead of being deflected by sub-mean noise peaks.
 
 Output is at NATIVE LOGICAL RESOLUTION — every pixel in the output file IS
 one logical pixel. Use `upscale.py` for NEAREST-upscaling to display sizes.
@@ -56,11 +66,16 @@ def compute_gradient_profile(arr_rgba: np.ndarray, axis: int) -> np.ndarray:
     axis=1 → vertical cuts (gradient along X, summed over Y)
     axis=0 → horizontal cuts (gradient along Y, summed over X)
 
-    Kernel is [-1, 0, 1] on grayscale; transparent pixels contribute 0.
+    Kernel is [-1, 0, 1] on grayscale. Per Hugo: pixels with alpha=0 contribute
+    gray=0; pixels with alpha>0 contribute FULL gray (no alpha attenuation).
+    This matters along soft-matte silhouette edges — alpha-attenuated gray
+    would weaken the silhouette-edge peak and let it drift away from logical
+    pixel boundaries.
     """
-    rgb = arr_rgba[..., :3].astype(np.float32)
-    alpha = arr_rgba[..., 3].astype(np.float32) / 255.0
-    gray = (0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]) * alpha
+    rgb = arr_rgba[..., :3].astype(np.float64)
+    alpha = arr_rgba[..., 3]
+    gray = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
+    gray[alpha == 0] = 0.0
 
     if axis == 1:
         grad = np.zeros_like(gray)
@@ -74,75 +89,111 @@ def compute_gradient_profile(arr_rgba: np.ndarray, axis: int) -> np.ndarray:
 
 
 def estimate_step_size(
-    profile: np.ndarray, peak_distance_filter: int = 4
-) -> int | None:
+    profile: np.ndarray,
+    peak_threshold_multiplier: float = 0.2,
+    peak_distance_filter: int = 4,
+) -> float | None:
     """Estimate the native pixel step size from a gradient profile.
 
-    Hugo's estimate_step_size:
-      - threshold = max(profile) * 0.2
+    Faithful port of Hugo's estimate_step_size:
+      - threshold = max(profile) * peak_threshold_multiplier (default 0.2)
       - find local maxima above threshold
       - filter peaks closer than peak_distance_filter - 1 = 3 apart
-      - return median of consecutive-peak differences
+      - return median of consecutive-peak differences as FLOAT
+
+    Returning a float (not int) matters: Hugo carries f64 step sizes through
+    `walk` so the walker stays locked on the true logical-pixel grid across
+    long sweeps. Integer-truncating drifts the walker off the grid over a
+    few-hundred-pixel character, smearing thin features (especially 1-pixel
+    outlines) across cell boundaries.
     """
     n = len(profile)
     if n < 3 or profile.max() <= 0:
         return None
-    threshold = float(profile.max()) * 0.2
+    threshold = float(profile.max()) * peak_threshold_multiplier
 
     # Local maxima above threshold
-    raw_peaks = []
+    raw_peaks: list[int] = []
     for i in range(1, n - 1):
         v = profile[i]
         if v > threshold and v > profile[i - 1] and v > profile[i + 1]:
             raw_peaks.append(i)
 
-    # Filter peaks closer than peak_distance_filter - 1 apart (keep the taller)
+    # Filter peaks closer than peak_distance_filter - 1 apart.
+    # Hugo's filter keeps the FIRST of each cluster (not the tallest) — match
+    # exactly so output is deterministic and matches the upstream reference.
     filtered: list[int] = []
     for p in raw_peaks:
-        if filtered and p - filtered[-1] < peak_distance_filter - 1:
-            if profile[p] > profile[filtered[-1]]:
-                filtered[-1] = p
-        else:
+        if not filtered or p - filtered[-1] > (peak_distance_filter - 1):
             filtered.append(p)
 
     if len(filtered) < 2:
         return None
 
-    diffs = np.diff(np.array(filtered))
-    return int(np.median(diffs))
+    diffs = np.diff(np.array(filtered, dtype=np.float64))
+    return float(np.median(diffs))
 
 
-def walk(profile: np.ndarray, step_size: int, window_ratio: float = 0.35) -> list[int]:
+def walk(
+    profile: np.ndarray,
+    step_size: float,
+    window_ratio: float = 0.35,
+    min_search_window: float = 2.0,
+    strength_threshold: float = 0.5,
+) -> list[int]:
     """Walk along the profile, snapping each expected cut to its local peak.
 
-    Hugo's walk: starts at 0, then for each expected cut at position k*step,
-    looks for the local-maximum within ±step*window_ratio and uses that as
-    the actual cut position. Cuts can be non-uniform (variable cell sizes).
+    Faithful port of Hugo's walk:
+      - Maintain `current_pos` as float, advance by `target = current_pos + step`.
+      - Search window is `max(step * window_ratio, min_search_window)`.
+      - Within the window, find the argmax. If that peak's value is above
+        `mean(profile) * strength_threshold`, snap to it; otherwise place a
+        uniform cut at `target` (don't be deflected by sub-mean noise peaks
+        in smooth regions).
+
+    The float walk + strength threshold combo is what keeps the cuts aligned
+    with logical pixel boundaries across the full sprite without getting
+    pulled off-grid by smooth-region noise. Cells stay aligned with actual
+    color transitions, so 1-pixel outlines fill exactly one cell instead of
+    smearing across two.
     """
     n = len(profile)
     if step_size <= 1 or n <= step_size:
         return [0, n]
 
-    half_window = max(1, int(round(step_size * window_ratio)))
-    cuts: list[int] = [0]
-    expected = step_size
+    search_window = max(step_size * window_ratio, min_search_window)
+    mean_val = float(profile.sum() / max(1, len(profile)))
+    threshold = mean_val * strength_threshold
 
-    while expected < n:
-        lo = max(cuts[-1] + 1, expected - half_window)
-        hi = min(n - 1, expected + half_window)
+    cuts: list[int] = [0]
+    current_pos = 0.0
+
+    while current_pos < n:
+        target = current_pos + step_size
+        if target >= n:
+            cuts.append(n)
+            break
+
+        lo = max(int(target - search_window), int(current_pos + 1.0))
+        hi = min(int(target + search_window), n)
         if hi <= lo:
-            # No window; just place a uniform cut and move on
-            cuts.append(int(min(expected, n - 1)))
-            expected = cuts[-1] + step_size
+            current_pos = target
             continue
-        # Argmax of the profile within [lo, hi]
-        window = profile[lo : hi + 1]
-        peak = lo + int(np.argmax(window))
-        # If the peak is the same as the last cut (degenerate), force step
-        if peak <= cuts[-1]:
-            peak = min(cuts[-1] + step_size, n - 1)
-        cuts.append(peak)
-        expected = peak + step_size
+
+        window = profile[lo:hi]
+        rel = int(np.argmax(window))
+        peak_idx = lo + rel
+        peak_val = float(window[rel])
+
+        if peak_val > threshold:
+            cuts.append(peak_idx)
+            current_pos = float(peak_idx)
+        else:
+            uniform_cut = int(target)
+            if uniform_cut <= cuts[-1]:
+                uniform_cut = cuts[-1] + 1
+            cuts.append(min(uniform_cut, n))
+            current_pos = target
 
     if cuts[-1] != n:
         cuts.append(n)
@@ -150,12 +201,12 @@ def walk(profile: np.ndarray, step_size: int, window_ratio: float = 0.35) -> lis
 
 
 def stabilize_axis(
-    cuts: list[int], step_size: int, n: int, min_gap_ratio: float = 0.5
+    cuts: list[int], step_size: float, n: int, min_gap_ratio: float = 0.5
 ) -> list[int]:
     """Stabilize cuts: drop cuts that are too close to their neighbor.
 
-    This is a simpler version of Hugo's cross-axis stabilize. It just removes
-    cuts that would produce cells smaller than half the step size — those are
+    Simplified version of Hugo's cross-axis stabilize. Removes cuts that
+    would produce cells smaller than half the step size — those are
     detection artifacts.
     """
     if len(cuts) < 3:
@@ -172,50 +223,131 @@ def stabilize_axis(
     return stabilized
 
 
+def snap_uniform_cuts(
+    profile: np.ndarray,
+    limit: int,
+    target_step: float,
+    window_ratio: float = 0.35,
+    min_search_window: float = 2.0,
+    strength_threshold: float = 0.5,
+    min_required: int = 4,
+) -> list[int]:
+    """Fallback when the walker yields too few cuts.
+
+    Computes uniformly-spaced target positions and snaps each toward its
+    local peak (same strength gate as `walk`). Used when a profile is too
+    weak / noisy for the walker to find enough cuts naturally. Faithful
+    port of Hugo's snap_uniform_cuts.
+    """
+    if limit <= 1:
+        return [0, max(limit, 1)]
+
+    if target_step is None or not np.isfinite(target_step) or target_step <= 0:
+        desired_cells = 1
+    else:
+        desired_cells = max(1, int(round(limit / target_step)))
+    desired_cells = max(desired_cells, max(min_required - 1, 1))
+    desired_cells = min(desired_cells, limit)
+
+    cell_width = limit / desired_cells
+    search_window = max(cell_width * window_ratio, min_search_window)
+    mean_val = float(profile.sum() / max(1, len(profile))) if len(profile) else 0.0
+    threshold = mean_val * strength_threshold
+
+    cuts: list[int] = [0]
+    for idx in range(1, desired_cells):
+        target = cell_width * idx
+        prev = cuts[-1]
+        if prev + 1 >= limit:
+            break
+        lo = max(int(target - search_window), prev + 1)
+        hi = min(int(target + search_window) + 1, limit)
+        if hi <= lo:
+            lo = prev + 1
+            hi = lo + 1
+        window = profile[lo:hi] if hi <= len(profile) else profile[lo:]
+        if window.size == 0:
+            chosen = min(int(round(target)), limit - 1)
+        else:
+            rel = int(np.argmax(window))
+            peak_idx = lo + rel
+            peak_val = float(window[rel])
+            if peak_val >= threshold:
+                chosen = peak_idx
+            else:
+                chosen = int(round(target))
+        if chosen <= prev:
+            chosen = prev + 1
+        if chosen >= limit:
+            chosen = limit - 1
+        cuts.append(chosen)
+
+    if cuts[-1] != limit:
+        cuts.append(limit)
+
+    # Deduplicate while preserving order
+    seen: set[int] = set()
+    dedup: list[int] = []
+    for c in cuts:
+        if c not in seen:
+            seen.add(c)
+            dedup.append(c)
+    return dedup
+
+
 def detect_grid(
     arr_rgba: np.ndarray,
-    pixel_size_override: int | None = None,
-) -> tuple[list[int], list[int], int]:
-    """Detect grid cuts (Hugo's full algorithm).
+    pixel_size_override: float | None = None,
+    min_cuts_per_axis: int = 4,
+    fallback_target_segments: int = 64,
+    max_step_ratio: float = 1.8,
+) -> tuple[list[int], list[int], float]:
+    """Detect grid cuts (Hugo's full algorithm, faithful port).
 
     Returns (col_cuts, row_cuts, effective_step_size). col_cuts defines the
     vertical cell boundaries (X positions); row_cuts the horizontal ones.
+
+    Step sizes are tracked as floats throughout to avoid drift over long
+    sweeps (a 0.5-px-per-step error compounds to several pixels by the time
+    the walker reaches the far edge of the sprite).
     """
     h, w = arr_rgba.shape[:2]
 
-    if pixel_size_override is not None:
-        step_x = step_y = pixel_size_override
-    else:
-        prof_x = compute_gradient_profile(arr_rgba, axis=1)
-        prof_y = compute_gradient_profile(arr_rgba, axis=0)
-        sx = estimate_step_size(prof_x)
-        sy = estimate_step_size(prof_y)
-        # Fallback if detection failed
-        if sx is None and sy is None:
-            fallback = max(2, min(h, w) // 64)
-            step_x = step_y = fallback
-        elif sx is None:
-            step_x = step_y = sy
-        elif sy is None:
-            step_x = step_y = sx
-        else:
-            # Hugo's resolve_step_sizes: average unless ratio > 1.8, then pick smaller
-            ratio = max(sx, sy) / max(1, min(sx, sy))
-            if ratio > 1.8:
-                step_x = step_y = min(sx, sy)
-            else:
-                avg = int(round((sx + sy) / 2))
-                step_x = step_y = max(2, avg)
-
-    # Profiles for the walk (recompute even with override, so cuts align to peaks)
     prof_x = compute_gradient_profile(arr_rgba, axis=1)
     prof_y = compute_gradient_profile(arr_rgba, axis=0)
+
+    if pixel_size_override is not None:
+        step_x = step_y = float(pixel_size_override)
+    else:
+        sx = estimate_step_size(prof_x)
+        sy = estimate_step_size(prof_y)
+        # Hugo's resolve_step_sizes: average unless ratio > max_step_ratio
+        if sx is None and sy is None:
+            fallback = max(1.0, min(h, w) / fallback_target_segments)
+            step_x = step_y = fallback
+        elif sx is None:
+            step_x = step_y = float(sy)
+        elif sy is None:
+            step_x = step_y = float(sx)
+        else:
+            ratio = max(sx, sy) / max(1e-9, min(sx, sy))
+            if ratio > max_step_ratio:
+                step_x = step_y = float(min(sx, sy))
+            else:
+                step_x = step_y = float((sx + sy) / 2.0)
 
     col_cuts = walk(prof_x, step_x)
     row_cuts = walk(prof_y, step_y)
 
     col_cuts = stabilize_axis(col_cuts, step_x, w)
     row_cuts = stabilize_axis(row_cuts, step_y, h)
+
+    # Hugo's fallback: if a profile yielded too few cuts (weak gradients in
+    # smooth sprites), snap to uniform cuts at the resolved step size.
+    if len(col_cuts) < min_cuts_per_axis:
+        col_cuts = snap_uniform_cuts(prof_x, w, step_x, min_required=min_cuts_per_axis)
+    if len(row_cuts) < min_cuts_per_axis:
+        row_cuts = snap_uniform_cuts(prof_y, h, step_y, min_required=min_cuts_per_axis)
 
     return col_cuts, row_cuts, step_x
 
@@ -340,32 +472,42 @@ def snap_pixels(
     input_path: Path,
     output_path: Path,
     colors: int = 16,
-    pixel_size: int | None = None,
-    alpha_threshold: int = 128,
+    pixel_size: float | None = None,
+    alpha_threshold: int = 1,
     kmeans_seed: int = 42,
     kmeans_iters: int = 15,
     kmeans_tol: float = 0.01,
-) -> tuple[Image.Image, int]:
+) -> tuple[Image.Image, float]:
     """Snap a transparent-bg concept to a clean pixel grid (Sprite Fusion).
 
     Faithful port of Hugo Duprez's spritefusion-pixel-snapper:
-      1. K-means++ quantize the full-res opaque pixels (k = `colors`).
-      2. Replace each opaque pixel with its nearest centroid.
-      3. Compute X/Y gradient profiles on the quantized image.
-      4. Estimate step size per axis (median of peak-to-peak distances).
-      5. Walk each profile to find non-uniform cuts at local gradient peaks
-         (this aligns each cell with one logical pixel of the original
-         drawing — critical for thin features like outlines).
-      6. Resample: for each cell defined by (col_cuts[i:i+1], row_cuts[j:j+1])
-         take the MODE of quantized RGBA pixels.
+      1. K-means++ quantize the full-res opaque pixels (alpha >= threshold;
+         default threshold=1, matching Hugo's "anything not fully-
+         transparent is opaque" rule).
+      2. Replace each opaque pixel with its nearest centroid; preserve
+         original alpha; zero out RGB of background pixels for clean mode
+         counting.
+      3. Compute X/Y gradient profiles on the quantized image (full gray
+         where alpha > 0, zero where alpha == 0).
+      4. Estimate float step size per axis (median of peak-to-peak distances
+         in each profile).
+      5. Walk each profile with FLOAT arithmetic, snapping to a local peak
+         only when peak > 0.5 × mean(profile). Otherwise place a uniform
+         cut. This aligns each cell with one logical pixel of the original
+         drawing without being deflected by smooth-region noise.
+      6. Fall back to snap_uniform_cuts if the walker yielded too few cuts.
+      7. Resample: per cell, take the MODE of (R,G,B,A) tuples — ties
+         broken by smallest packed value.
 
-    Why grid-aligned cuts matter: uniform NxN blocks crossing logical-pixel
-    boundaries mix outline pixels with body pixels — the body wins MODE
-    because it's the majority, and the outline disappears. Hugo's walk
-    places cuts at the actual color transitions so each cell contains one
-    logical pixel of the rendered drawing, preserving thin outlines cleanly.
+    Why faithful porting matters: integer-truncating the step size compounds
+    a sub-pixel error over the sweep that smears 1-pixel outlines across
+    two cells (body wins mode → outline disappears). Excluding edge pixels
+    from k-means training (alpha_threshold=128) starves the dark cluster
+    of outline samples (no dedicated near-black centroid → outlines merge
+    into "dark brown"). Both bugs ship together as muddy outlines; the
+    fixes ship together as crisp ones.
 
-    Output is at NATIVE LOGICAL RESOLUTION (small, e.g. 80-200px per side).
+    Output is at NATIVE LOGICAL RESOLUTION (small, e.g. 80-250px per side).
     Use `upscale.py` to NEAREST-upscale to a display size.
     """
     img = Image.open(input_path).convert("RGBA")
@@ -373,9 +515,14 @@ def snap_pixels(
 
     arr = np.array(img)  # (H, W, 4) uint8
     alpha = arr[..., 3]
+    # Hugo treats `alpha > 0` as opaque (default alpha_threshold=1). Including
+    # anti-aliased / soft-matte edge pixels in k-means training is what gives
+    # the quantizer enough dark-outline samples to allocate a dedicated near-
+    # black centroid. Excluding them (the old default of 128) starves the
+    # dark cluster and pulls outlines into the "dark brown" centroid instead.
     fg_mask = alpha >= alpha_threshold
 
-    # 1. K-means quantize the OPAQUE pixels.
+    # 1. K-means quantize the opaque pixels.
     rgb_quantized = arr[..., :3].copy()
     if fg_mask.any():
         opaque_pixels = arr[fg_mask, :3].astype(np.float32)
@@ -389,15 +536,17 @@ def snap_pixels(
         centroid_rgb = np.clip(np.round(centroids), 0, 255).astype(np.uint8)
         rgb_quantized[fg_mask] = centroid_rgb[labels]
 
-    # Hard-threshold alpha early. The grid detection and the per-cell mode
-    # both operate on this hard-alpha image so transparent pixels form a
-    # single distinct value in MODE counting.
-    alpha_hard = np.where(fg_mask, 255, 0).astype(np.uint8)
-    # Zero out RGB of transparent pixels so the packed-RGBA value collapses
-    # to a single sentinel (0) for all transparent pixels.
+    # Zero out RGB of background pixels (alpha < threshold) so they all pack
+    # to the same sentinel for mode-per-cell counting. This is a safety net
+    # over Hugo's behavior — the bg-removal helper can leave despill residue
+    # in alpha=0 pixels (small non-zero RGB), which would fragment mode counts
+    # on edge cells. Hugo's reference inputs have clean (0,0,0,0) backgrounds.
     rgb_quantized = rgb_quantized.copy()
     rgb_quantized[~fg_mask] = 0
-    quantized_rgba = np.dstack([rgb_quantized, alpha_hard])
+    # Preserve original alpha (Hugo's behavior). The mode-per-cell step keys
+    # off the full (R,G,B,A) tuple; partial-alpha edge pixels naturally
+    # become partial-alpha output pixels for a soft silhouette.
+    quantized_rgba = np.dstack([rgb_quantized, alpha])
 
     # 2. Detect grid (Hugo's compute_profiles + estimate_step_size + walk
     # + stabilize). Cuts are at local gradient peaks → cells align with
@@ -460,16 +609,22 @@ def main() -> None:
     )
     parser.add_argument(
         "--pixel-size",
-        type=int,
+        type=float,
         default=None,
-        help="Override the auto-detected native pixel block size. "
-        "If omitted, the snapper detects from the (quantized) input.",
+        help="Override the auto-detected native pixel block size (float; the "
+        "walker keeps float precision across the sweep). If omitted, the "
+        "snapper detects from the (quantized) input.",
     )
     parser.add_argument(
         "--alpha-threshold",
         type=int,
-        default=128,
-        help="A pixel is treated as opaque if alpha >= threshold (default 128).",
+        default=1,
+        help="A pixel is treated as opaque if alpha >= threshold (default 1, "
+        "matching Hugo's reference implementation). Includes anti-aliased / "
+        "soft-matte edge pixels in k-means training, which is what gives the "
+        "quantizer enough dark-outline samples to allocate a dedicated near-"
+        "black centroid. Raise to ~64-128 for inputs where soft-matte residue "
+        "is producing a halo around the silhouette.",
     )
     parser.add_argument(
         "--kmeans-seed",
@@ -508,9 +663,9 @@ def main() -> None:
 
     print(f"snapped {args.input} -> {args.output}")
     if args.pixel_size is None:
-        print(f"  detected native pixel size: {used_pixel_size}px (from quantized image)")
+        print(f"  detected native pixel size: {used_pixel_size:.2f}px (from quantized image)")
     else:
-        print(f"  used pixel size: {used_pixel_size}px (manual override)")
+        print(f"  used pixel size: {used_pixel_size:.2f}px (manual override)")
     print(f"  k-means palette: k={args.colors}, seed={args.kmeans_seed}, max_iter={args.kmeans_iters}")
     print(f"  alpha threshold: {args.alpha_threshold}")
     print(f"  output size: {result.size}  (Sprite Fusion native logical resolution)")
